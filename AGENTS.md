@@ -3,10 +3,11 @@
 ## Project goal
 
 Build a working browser-based multiplayer game called **Office Game
-Hub**. Phase 1 includes the home screen, room/lobby screen, and five
+Hub**. Phase 1 includes the home screen, room/lobby screen, and six
 playable games: **Mini Car Race** for 2--7 players, **Tic-Tac-Toe**
-for 2 players, **Bomb Tag** for 2--7 players, **Arena Blaster**
-for up to 8 players, and **Space Shooting** for 2--7 players.
+and **Chess** for 2 players each, **Bomb Tag** for 2--7 players,
+**Arena Blaster** for up to 8 players, and **Space Shooting** for
+2--7 players.
 
 The owner runs the app on a Windows laptop. Colleagues on the same
 office Wi-Fi/LAN join from their browsers using the host laptop's IPv4
@@ -78,9 +79,8 @@ Create a polished, responsive landing page titled **Office Game Hub**.
 
 -   Show a clear title and short tagline for quick office-break games.
 -   Provide **Create Room** and **Join Room** actions.
--   Show Mini Car Race, Tic-Tac-Toe, Bomb Tag, Arena Blaster, and Space
-    Shooting as
-    playable game cards.
+-   Show Mini Car Race, Tic-Tac-Toe, Chess, Bomb Tag, Arena Blaster,
+    and Space Shooting as playable game cards.
 -   Other game categories may be shown as disabled "Coming later" cards,
     but do not build other games in this phase.
 -   Show the number of connected players if this can be calculated
@@ -103,7 +103,7 @@ Create a polished, responsive landing page titled **Office Game Hub**.
 
 -   Room codes must be unique, easy to read, and five characters long.
 -   Mini Car Race and Bomb Tag rooms support **2--7 players**;
-    Tic-Tac-Toe rooms support exactly **2 players**; Arena Blaster
+    Tic-Tac-Toe and Chess rooms support exactly **2 players**; Arena Blaster
     supports up to **8 players**; Space Shooting supports **2--7 players**.
 -   A player can create a room and becomes its host.
 -   Other players can join with the room code.
@@ -160,7 +160,21 @@ Build a **2D top-down arcade racing game**, not a 3D game.
 -   Show each player's mark, the active turn, the outcome, and a host
     rematch action after the game ends.
 
-### 6. Arena Blaster gameplay
+### 6. Chess gameplay
+
+-   Support exactly two players per room. Assign White and Black when
+    the host starts the game and switch colors for each rematch.
+-   Display an interactive, responsive 2D chess board from each
+    player's perspective, with clear turn, legal-move, check, and
+    result indicators.
+-   Validate moves on the server, including king safety, checkmate,
+    stalemate, castling, en passant, pawn promotion, insufficient
+    material, the fifty-move rule, and threefold repetition.
+-   Allow only the host to start a game or rematch; require both players
+    to be connected before starting. An active-game disconnect forfeits
+    the match to the connected opponent.
+
+### 7. Arena Blaster gameplay
 
 -   Build a non-realistic top-down arcade blaster; use colorful energy
     shots and no gore.
@@ -180,7 +194,7 @@ Build a **2D top-down arcade racing game**, not a 3D game.
     score target with a fixed match timer.
 -   Keep each mode, team assignment, and match state isolated by room.
 
-### 7. Space Shooting gameplay
+### 8. Space Shooting gameplay
 
 -   Support 2--7 connected players per room. The host chooses co-op wave
     survival or competitive free-for-all in the lobby.
@@ -196,7 +210,7 @@ Build a **2D top-down arcade racing game**, not a 3D game.
 -   Keep the selected mode and game state isolated by room. Host can
     start a rematch after results.
 
-### 8. Bomb Tag gameplay
+### 9. Bomb Tag gameplay
 
 -   Support 2--7 players in a shared real-time arena.
 -   Players move with WASD or arrow keys; touch controls should be
@@ -211,7 +225,7 @@ Build a **2D top-down arcade racing game**, not a 3D game.
 -   Validate player movement and collision server-side; never accept
     client-submitted positions, bomb holders, fuses, or eliminations.
 
-### 9. Multiplayer networking and game integrity
+### 10. Multiplayer networking and game integrity
 
 The server is authoritative for room membership, host permissions, game
 lifecycle, movement, checkpoints/laps, bomb handoffs, shooting, hits,
@@ -237,7 +251,7 @@ result state.
 -   Display connection status and recover gracefully from temporary
     disconnections.
 
-### 10. Local network access on Windows
+### 11. Local network access on Windows
 
 The app must work from other laptops on the same local network.
 
@@ -258,14 +272,14 @@ The app must work from other laptops on the same local network.
 -   Keep the app local-network-only for now. Do not configure router
     port forwarding or expose the server publicly.
 
-### 11. User interface states
+### 12. User interface states
 
 Include proper loading, empty, error, waiting, countdown, racing,
 finished, and disconnected states. Show useful messages rather than
 silently failing. Buttons must perform real actions; do not leave core
 controls as placeholders.
 
-### 12. Quality and security
+### 13. Quality and security
 
 -   Keep code readable and split logic into small modules.
 -   Validate all room codes and player inputs on the server.
@@ -309,6 +323,8 @@ Phase 1 is complete only when:
     modes through 4v4, and rotation of extra players.
 -   Space Shooting supports co-op wave survival and free-for-all for
     2--7 players.
+-   Chess supports two players, server-validated legal moves, standard
+    check and draw outcomes, disconnect forfeits, and host rematches.
 -   Players can steer cars and see other players move in real time.
 -   Checkpoints and laps work, and race results are consistent for
     everyone.
@@ -327,5 +343,5 @@ URL. 4. How to test with multiple tabs and with colleagues. 5.
 Tests/build results and any remaining limitations.
 
 Do not implement any additional games beyond Mini Car Race, Tic-Tac-Toe,
-Bomb Tag, Arena Blaster, and Space Shooting unless the user asks to
-continue.
+Chess, Bomb Tag, Arena Blaster, and Space Shooting unless the user asks
+to continue.

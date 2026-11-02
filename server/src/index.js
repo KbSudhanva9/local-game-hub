@@ -110,6 +110,23 @@ io.on('connection', (socket) => {
     room: roomManager.resetTicTacToe(socket.data.roomCode, socket.data.playerId, socket.id),
   })));
 
+  socket.on('chess:start', acknowledgeAction(() => ({
+    room: roomManager.startChess(socket.data.roomCode, socket.data.playerId, socket.id),
+  })));
+
+  socket.on('chess:move', acknowledgeAction((payload = {}) => ({
+    room: roomManager.playChessMove(
+      socket.data.roomCode,
+      socket.data.playerId,
+      socket.id,
+      { from: payload.from, to: payload.to, promotion: payload.promotion },
+    ),
+  })));
+
+  socket.on('chess:reset', acknowledgeAction(() => ({
+    room: roomManager.resetChess(socket.data.roomCode, socket.data.playerId, socket.id),
+  })));
+
   socket.on('bomb:start', acknowledgeAction(() => ({
     room: roomManager.startBombTag(socket.data.roomCode, socket.data.playerId, socket.id),
   })));

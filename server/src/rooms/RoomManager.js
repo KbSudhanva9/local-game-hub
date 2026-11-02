@@ -41,14 +41,21 @@ import {
   tickSpaceShooter,
   validateSpaceShooterSettings,
 } from '../games/spaceShooter.js';
+import {
+  createChessGame,
+  forfeitChessGame,
+  playChessMove,
+  serializeChessGame,
+} from '../games/chess.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const MAX_PLAYERS = 7;
 const ROOM_CODE_LENGTH = 5;
-const GAME_IDS = new Set(['mini-car-race', 'tic-tac-toe', 'bomb-tag', 'arena-blaster', 'space-shooter']);
+const GAME_IDS = new Set(['mini-car-race', 'tic-tac-toe', 'chess', 'bomb-tag', 'arena-blaster', 'space-shooter']);
 const GAME_MAX_PLAYERS = {
   'mini-car-race': MAX_PLAYERS,
   'tic-tac-toe': 2,
+  chess: 2,
   'bomb-tag': MAX_PLAYERS,
   'arena-blaster': BLASTER_ARENA.maxPlayers,
   'space-shooter': SPACE_ARENA.maxPlayers,
@@ -92,6 +99,8 @@ export class RoomManager {
       selectedMapId: DEFAULT_MAP_ID,
       ticTacToe: null,
       ticTacToeNextStarterId: null,
+      chess: null,
+      chessNextWhiteId: null,
       bombTag: null,
       blasterSettings: { mode: 'solo', teamSize: 1, rotationOffset: 0 },
       blaster: null,
@@ -242,6 +251,57 @@ export class RoomManager {
     };
     this.notify(room);
     return this.serialize(room);
+  }
+
+  startChess(code, playerId, socketId) {
+    const room = this.getMemberRoom(code, playerId, socketId);
+    if (room.gameId !== 'chess') throw new RoomError('This room is not playing Chess.', 'WRONG_GAME');
+    if (room.status !== 'lobby') throw new RoomError('Chess can only start from the lobby.', 'ROOM_STARTED');
+    if (room.hostId !== playerId) throw new RoomError('Only the host can start the game.', 'HOST_ONLY');
+    if (room.players.length !== 2 || room.players.some((player) => !player.connected)) {
+      throw new RoomError('Two connected players are needed to start Chess.', 'NEED_MORE_PLAYERS');
+    }
+
+    const whiteId = room.chessNextWhiteId && room.players.some((player) => player.id === room.chessNextWhiteId)
+      ? room.chessNextWhiteId
+      : room.hostId;
+    const blackId = room.players.find((player) => player.id !== whiteId).id;
+    room.chess = createChessGame(whiteId, blackId);
+    room.status = 'playing';
+    room.finishingOrder = [];
+    this.notify(room);
+    return this.serialize(room);
+  }
+
+  playChessMove(code, playerId, socketId, move) {
+    const room = this.getMemberRoom(code, playerId, socketId);
+    if (room.gameId !== 'chess') throw new RoomError('This room is not playing Chess.', 'WRONG_GAME');
+    if (room.status !== 'playing' || !room.chess) {
+      throw new RoomError('Chess is not currently accepting moves.', 'GAME_NOT_ACTIVE');
+    }
+    if (!move || typeof move !== 'object' || Array.isArray(move)) {
+      throw new RoomError('Choose a valid chess move.', 'INVALID_CHESS_MOVE');
+    }
+    try {
+      playChessMove(room.chess, playerId, move.from, move.to, move.promotion);
+    } catch (error) {
+      throw new RoomError(error.message, 'INVALID_CHESS_MOVE');
+    }
+    if (room.chess.finished) {
+      room.status = 'finished';
+      room.finishingOrder = room.chess.winnerId ? [room.chess.winnerId] : [];
+    }
+    this.notify(room);
+    return this.serialize(room);
+  }
+
+  resetChess(code, playerId, socketId) {
+    const room = this.getMemberRoom(code, playerId, socketId);
+    if (room.gameId !== 'chess') throw new RoomError('This room is not playing Chess.', 'WRONG_GAME');
+    if (room.hostId !== playerId) throw new RoomError('Only the host can start a rematch.', 'HOST_ONLY');
+    if (room.status !== 'finished') throw new RoomError('Finish the game before starting a rematch.', 'GAME_NOT_FINISHED');
+    room.chessNextWhiteId = room.chess?.blackId ?? null;
+    return this.resetRoom(room);
   }
 
   startBombTag(code, playerId, socketId) {
@@ -555,6 +615,7 @@ export class RoomManager {
     room.goUntil = null;
     room.finishingOrder = [];
     room.ticTacToe = null;
+    room.chess = null;
     room.bombTag = null;
     room.blaster = null;
     room.spaceShooter = null;
@@ -578,6 +639,11 @@ export class RoomManager {
 
     if (room.gameId === 'tic-tac-toe' && room.status === 'playing') {
       this.forfeitTicTacToe(room, target.id);
+    } else if (room.gameId === 'chess' && room.status === 'playing') {
+      if (forfeitChessGame(room.chess, target.id)) {
+        room.status = 'finished';
+        room.finishingOrder = [room.chess.winnerId];
+      }
     } else if (room.gameId === 'bomb-tag' && room.bombTag?.players[target.id]?.alive) {
       this.forfeitBombTag(room, target.id);
     } else if (room.gameId === 'space-shooter' && room.spaceShooter &&
@@ -604,7 +670,7 @@ export class RoomManager {
 
   leaveRoom(codeInput, playerId, socketId) {
     const room = this.getMemberRoom(codeInput, playerId, socketId);
-    if (room.status !== 'lobby' && !(room.status === 'finished' && ['tic-tac-toe', 'bomb-tag', 'arena-blaster', 'space-shooter'].includes(room.gameId))) {
+    if (room.status !== 'lobby' && !(room.status === 'finished' && ['tic-tac-toe', 'chess', 'bomb-tag', 'arena-blaster', 'space-shooter'].includes(room.gameId))) {
       throw new RoomError('You cannot leave while a game is in progress.', 'GAME_ACTIVE');
     }
     room.players = room.players.filter((player) => player.id !== playerId);
@@ -634,6 +700,11 @@ export class RoomManager {
         this.finishIfComplete(room);
       } else if (room.gameId === 'tic-tac-toe' && room.status === 'playing') {
         this.forfeitTicTacToe(room, player.id);
+      } else if (room.gameId === 'chess' && room.status === 'playing') {
+        if (forfeitChessGame(room.chess, player.id)) {
+          room.status = 'finished';
+          room.finishingOrder = [room.chess.winnerId];
+        }
       } else if (room.gameId === 'bomb-tag' && (room.status === 'countdown' || room.status === 'playing')) {
         player.disconnected = true;
         this.forfeitBombTag(room, player.id);
@@ -831,6 +902,7 @@ export class RoomManager {
         symbols: { ...room.ticTacToe.symbols },
         winningLine: room.ticTacToe.winningLine ? [...room.ticTacToe.winningLine] : null,
       } : null,
+      chess: serializeChessGame(room.chess),
       bombTag: serializeBombTag(room.bombTag),
       blasterSettings: { ...room.blasterSettings },
       blaster: serializeBlaster(room.blaster),

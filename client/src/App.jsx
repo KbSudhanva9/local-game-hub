@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import { Race } from './games/Race.jsx';
 import { TicTacToe } from './games/TicTacToe.jsx';
+import { Chess } from './games/Chess.jsx';
 import { BombTag } from './games/BombTag.jsx';
 import { ArenaBlaster } from './games/ArenaBlaster.jsx';
 import { SpaceShooter } from './games/SpaceShooter.jsx';
@@ -156,6 +157,7 @@ export default function App() {
     const gameStartEvents = {
       'mini-car-race': 'race:start',
       'tic-tac-toe': 'game:start',
+      chess: 'chess:start',
       'bomb-tag': 'bomb:start',
       'arena-blaster': 'blaster:start',
       'space-shooter': 'space:start',
@@ -204,6 +206,18 @@ export default function App() {
     clearAlerts();
     const result = await send('game:move', { cell });
     if (!result?.ok) setError(result?.error || 'Could not place your mark.');
+  };
+
+  const resetChess = async () => {
+    clearAlerts();
+    const result = await send('chess:reset');
+    if (!result?.ok) setError(result?.error || 'Could not start a chess rematch.');
+  };
+
+  const makeChessMove = async (from, to, promotion) => {
+    clearAlerts();
+    const result = await send('chess:move', { from, to, promotion });
+    if (!result?.ok) setError(result?.error || 'Could not make that chess move.');
   };
 
   const resetBombTag = async () => {
@@ -327,7 +341,7 @@ export default function App() {
             <h1>{formMode === 'create' ? 'Choose your nickname' : 'Join a room'}</h1>
             <p className="muted">
               {formMode === 'create'
-                ? `Create a ${selectedGameId === 'tic-tac-toe' ? 'Tic-Tac-Toe' : selectedGameId === 'bomb-tag' ? 'Bomb Tag' : selectedGameId === 'arena-blaster' ? 'Arena Blaster' : selectedGameId === 'space-shooter' ? 'Space Shooting' : 'Mini Car Race'} room and invite your friends.`
+                ? `Create a ${selectedGameId === 'tic-tac-toe' ? 'Tic-Tac-Toe' : selectedGameId === 'chess' ? 'Chess' : selectedGameId === 'bomb-tag' ? 'Bomb Tag' : selectedGameId === 'arena-blaster' ? 'Arena Blaster' : selectedGameId === 'space-shooter' ? 'Space Shooting' : 'Mini Car Race'} room and invite your friends.`
                 : 'No accounts, no setup. Enter your nickname and the room code to join your friends.'}
             </p>
             <label className="field-label" htmlFor="nickname">Nickname</label>
@@ -379,6 +393,17 @@ export default function App() {
                 onLeave={leaveRoom}
                 onRemovePlayer={removePlayer}
               />
+            : room.gameId === 'chess'
+              ? <Chess
+                  room={room}
+                  playerId={session.playerId}
+                  connected={connected}
+                  error={error}
+                  onMove={makeChessMove}
+                  onRematch={resetChess}
+                  onLeave={leaveRoom}
+                  onRemovePlayer={removePlayer}
+                />
             : room.gameId === 'bomb-tag'
               ? <BombTag
                   room={room}
@@ -457,7 +482,7 @@ function Home({ connectedPlayers, onCreate, onJoin, error, notice }) {
 
       <div className="games-heading">
         <div><div className="eyebrow">THE GAME SHELF</div><h2>Pick your next obsession</h2></div>
-        <span className="shelf-count">05 GAMES READY</span>
+        <span className="shelf-count">06 GAMES READY</span>
       </div>
       <article className="game-card">
         <div className="game-art">
@@ -490,6 +515,24 @@ function Home({ connectedPlayers, onCreate, onJoin, error, notice }) {
         <div className="game-number">02</div>
       </article>
       <article className="game-card">
+        <div className="game-art chess-game-art">
+          <div className="chess-art-board" aria-hidden="true">
+            <span>♜</span><span>♞</span><span>♝</span><span>♛</span>
+            <span>♟</span><span>♟</span><span>♟</span><span>♟</span>
+            <span /><span /><span /><span />
+            <span /><span>♘</span><span /><span />
+          </div>
+          <span className="game-art-badge">2-PLAYER</span>
+        </div>
+        <div className="game-info">
+          <div className="game-type chess-game-type">CLASSIC · 2 PLAYERS</div>
+          <h3>Chess</h3>
+          <p>Challenge a colleague to a full game of strategy, tactics, and checkmate.</p>
+          <button className="text-button" onClick={() => onCreate('chess')}>Play now <span>→</span></button>
+        </div>
+        <div className="game-number">03</div>
+      </article>
+      <article className="game-card">
         <div className="game-art bomb-game-art">
           <div className="bomb-art-arena" aria-hidden="true">
             <span className="bomb-art-player player-one">A</span>
@@ -504,7 +547,7 @@ function Home({ connectedPlayers, onCreate, onJoin, error, notice }) {
           <p>Pass the bomb, dodge the blast, and be the last player standing.</p>
           <button className="text-button" onClick={() => onCreate('bomb-tag')}>Play now <span>→</span></button>
         </div>
-        <div className="game-number">03</div>
+        <div className="game-number">04</div>
       </article>
       <article className="game-card">
         <div className="game-art blaster-game-art">
@@ -521,7 +564,7 @@ function Home({ connectedPlayers, onCreate, onJoin, error, notice }) {
           <p>Practice against bots, battle free-for-all, or team up for balanced matches.</p>
           <button className="text-button" onClick={() => onCreate('arena-blaster')}>Play now <span>→</span></button>
         </div>
-        <div className="game-number">04</div>
+        <div className="game-number">05</div>
       </article>
       <article className="game-card">
         <div className="game-art space-game-art">
@@ -539,7 +582,7 @@ function Home({ connectedPlayers, onCreate, onJoin, error, notice }) {
           <p>Team up against waves of aliens or take on your friends in a space duel.</p>
           <button className="text-button" onClick={() => onCreate('space-shooter')}>Play now <span>→</span></button>
         </div>
-        <div className="game-number">05</div>
+        <div className="game-number">06</div>
       </article>
       <footer className="home-footer">
         <span>MADE FOR THE MOMENTS BETWEEN MEETINGS</span>
@@ -557,6 +600,7 @@ function Lobby({ room, playerId, error, notice, onStart, onSelectMap, onConfigur
   const maps = room.maps || [];
   const selectedMap = maps.find((map) => map.id === room.selectedMapId);
   const isTicTacToe = room.gameId === 'tic-tac-toe';
+  const isChess = room.gameId === 'chess';
   const isBombTag = room.gameId === 'bomb-tag';
   const isBlaster = room.gameId === 'arena-blaster';
   const isSpaceShooter = room.gameId === 'space-shooter';
@@ -573,6 +617,8 @@ function Lobby({ room, playerId, error, notice, onStart, onSelectMap, onConfigur
   const spaceMode = room.spaceShooterSettings?.mode || 'coop';
   const enoughPlayers = isTicTacToe
     ? connectedCount === 2
+    : isChess
+      ? connectedCount === 2
     : isBlaster
       ? blasterCanStart
       : connectedCount >= 2;
@@ -607,6 +653,8 @@ function Lobby({ room, playerId, error, notice, onStart, onSelectMap, onConfigur
           <h1>
             {isTicTacToe
               ? <>Ready to<br />make a move<span>?</span></>
+              : isChess
+                ? <>Check your<br />strategy<span>.</span></>
               : isBombTag
                 ? <>The bomb is<br />waiting<span>!</span></>
                 : isBlaster
@@ -618,6 +666,8 @@ function Lobby({ room, playerId, error, notice, onStart, onSelectMap, onConfigur
           <p className="muted">
             {isTicTacToe
               ? 'Invite one opponent. Players alternate X and O each game; X takes the first turn.'
+              : isChess
+                ? 'Invite one opponent for a complete chess match. The host plays White first; colors switch on each rematch.'
               : isBombTag
                 ? 'Invite 1–6 opponents. Move around the arena, tag another player to pass the bomb, and avoid holding it when it explodes.'
                 : isBlaster
@@ -716,7 +766,7 @@ function Lobby({ room, playerId, error, notice, onStart, onSelectMap, onConfigur
             </section>
           )}
           <div className="player-panel">
-            <div className="panel-heading"><div><h2>{isTicTacToe || isBombTag || isBlaster || isSpaceShooter ? 'Players' : 'On the grid'}</h2><span>{connectedCount} / {room.maxPlayers} connected</span></div><span className="panel-live"><i /> LIVE</span></div>
+            <div className="panel-heading"><div><h2>{isTicTacToe || isChess || isBombTag || isBlaster || isSpaceShooter ? 'Players' : 'On the grid'}</h2><span>{connectedCount} / {room.maxPlayers} connected</span></div><span className="panel-live"><i /> LIVE</span></div>
             <ul className="player-list">
               {room.players.map((player, index) => (
                 <li key={player.id} className={!player.connected ? 'player-offline' : ''}>
@@ -740,7 +790,7 @@ function Lobby({ room, playerId, error, notice, onStart, onSelectMap, onConfigur
                       : 'Waiting for at least one opponent to join…'
                   : isSpaceShooter
                     ? 'Waiting for at least one teammate to join…'
-                  : `Waiting for ${isTicTacToe ? 'one opponent' : isBombTag ? 'at least one opponent' : 'another driver'} to join…`}
+                  : `Waiting for ${isTicTacToe || isChess ? 'one opponent' : isBombTag ? 'at least one opponent' : 'another driver'} to join…`}
               </div>
             )}
           </div>
@@ -753,13 +803,13 @@ function Lobby({ room, playerId, error, notice, onStart, onSelectMap, onConfigur
             <h2>{selectedMap?.name || 'Mini Car Race'}</h2>
             <p>3 laps · checkpoints · bragging rights</p>
           </div>}
-          <div className="lobby-hint"><span className="hint-icon">{isTicTacToe ? '✕' : isBombTag ? '✹' : isBlaster || isSpaceShooter ? '✦' : '⌨'}</span><div><strong>{isTicTacToe || isBombTag || isBlaster || isSpaceShooter ? 'How to play' : 'Know the controls'}</strong><p>{isTicTacToe ? 'Take turns choosing an empty square. Three in a row wins.' : isBombTag ? 'Use WASD or arrow keys to run. Touch another player to hand off the bomb.' : isBlaster ? 'Move with WASD, aim with the mouse, and hold click or Space to fire.' : isSpaceShooter ? 'Move with WASD or arrows, aim with your mouse, and hold click or Space to shoot.' : 'WASD or arrow keys to drive once the race begins.'}</p></div></div>
+          <div className="lobby-hint"><span className="hint-icon">{isTicTacToe ? '✕' : isChess ? '♞' : isBombTag ? '✹' : isBlaster || isSpaceShooter ? '✦' : '⌨'}</span><div><strong>{isTicTacToe || isChess || isBombTag || isBlaster || isSpaceShooter ? 'How to play' : 'Know the controls'}</strong><p>{isTicTacToe ? 'Take turns choosing an empty square. Three in a row wins.' : isChess ? 'Select a piece, then a highlighted legal square. Checkmate your opponent to win.' : isBombTag ? 'Use WASD or arrow keys to run. Touch another player to hand off the bomb.' : isBlaster ? 'Move with WASD, aim with the mouse, and hold click or Space to fire.' : isSpaceShooter ? 'Move with WASD or arrows, aim with your mouse, and hold click or Space to shoot.' : 'WASD or arrow keys to drive once the race begins.'}</p></div></div>
           <button
             className="button primary wide start-button"
             disabled={!canStart}
             onClick={() => { onClear(); onStart(); }}
           >
-            {isHost ? (isTicTacToe ? 'Start game' : isBombTag ? 'Start Bomb Tag' : isBlaster ? 'Start Arena Blaster' : isSpaceShooter ? 'Start Space Shooting' : 'Start the race') : 'Waiting for host'}
+            {isHost ? (isTicTacToe ? 'Start game' : isChess ? 'Start Chess' : isBombTag ? 'Start Bomb Tag' : isBlaster ? 'Start Arena Blaster' : isSpaceShooter ? 'Start Space Shooting' : 'Start the race') : 'Waiting for host'}
             {isHost && <span>→</span>}
           </button>
           <p className="start-note">{isHost ? 'Ready when your crew is.' : 'The host will start when everyone is ready.'}</p>
