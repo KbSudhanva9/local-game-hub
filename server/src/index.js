@@ -17,6 +17,7 @@ const clientDist = join(projectRoot, 'client', 'dist');
 const roomManager = new RoomManager({
   onUpdate: (code, state) => io.to(code).emit('room:state', state),
   onStats: (connectedPlayers) => io.emit('stats:update', { connectedPlayers }),
+  onClose: (code) => io.to(code).emit('room:closed'),
 });
 
 app.get('/api/stats', (_request, response) => {
@@ -74,10 +75,18 @@ io.on('connection', (socket) => {
 
   socket.on('room:reconnect', acknowledgeAction((payload = {}) => {
     const result = roomManager.reconnectRoom(payload.code, payload.token, socket.id);
+    if (result.previousSocketId) {
+      const previousSocket = io.sockets.sockets.get(result.previousSocketId);
+      if (previousSocket) {
+        previousSocket.leave(result.code);
+        delete previousSocket.data.roomCode;
+        delete previousSocket.data.playerId;
+      }
+    }
     socket.data.roomCode = result.code;
     socket.data.playerId = result.playerId;
     socket.join(result.code);
-    return result;
+    return { room: result.room, playerId: result.playerId, code: result.code };
   }));
 
   socket.on('room:leave', acknowledgeAction(() => {

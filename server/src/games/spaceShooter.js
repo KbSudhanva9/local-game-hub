@@ -74,6 +74,7 @@ export function createSpaceShooter(players, settings, now, random = Math.random)
         kills: 0,
         deaths: 0,
         connected: true,
+        reconnecting: false,
         alive: true,
         respawnAt: null,
         invulnerableUntil: 0,
@@ -111,7 +112,7 @@ export function tickSpaceShooter(game, now, random = Math.random) {
   const deltaSeconds = SPACE_ARENA.tickMs / 1000;
 
   for (const player of Object.values(game.players)) {
-    if (!player.connected) continue;
+    if (!player.connected || player.reconnecting) continue;
     if (!player.alive) {
       if (player.respawnAt !== null && player.respawnAt <= now &&
           (game.mode === 'free-for-all' || player.lives > 0)) {
@@ -154,14 +155,14 @@ export function tickSpaceShooter(game, now, random = Math.random) {
     if (game.enemies.length === 0 && game.nextWaveAt !== null && game.nextWaveAt <= now) {
       startNextWave(game, now, random);
     }
-    if (!Object.values(game.players).some((player) => player.connected && player.lives > 0)) {
+    if (!Object.values(game.players).some((player) => (player.connected || player.reconnecting) && player.lives > 0)) {
       game.finished = true;
     }
   } else {
     if (now >= game.endsAt) {
       finishFreeForAll(game);
     } else {
-      const remainingPlayers = Object.values(game.players).filter((player) => player.connected);
+      const remainingPlayers = Object.values(game.players).filter((player) => player.connected || player.reconnecting);
       if (remainingPlayers.length <= 1) {
         game.winnerId = remainingPlayers[0]?.id ?? null;
         game.draw = remainingPlayers.length === 0;
@@ -177,6 +178,7 @@ export function disconnectSpaceShooterPlayer(game, playerId) {
   if (!player) return Boolean(game?.finished);
   const wasFinished = game.finished;
   player.connected = false;
+  player.reconnecting = false;
   player.controls = { ...EMPTY_CONTROLS };
   player.alive = false;
   player.respawnAt = null;
@@ -193,12 +195,22 @@ export function disconnectSpaceShooterPlayer(game, playerId) {
   return game.finished;
 }
 
+export function pauseSpaceShooterPlayer(game, playerId) {
+  const player = game?.players[playerId];
+  if (!player) return false;
+  player.connected = false;
+  player.reconnecting = true;
+  player.controls = { ...EMPTY_CONTROLS };
+  return true;
+}
+
 export function reconnectSpaceShooterPlayer(game, playerId, now) {
   const player = game?.players[playerId];
-  if (!player || game.finished) return false;
+  if (!player) return false;
   player.connected = true;
+  player.reconnecting = false;
   player.controls = { ...EMPTY_CONTROLS };
-  if (game.mode === 'coop' && player.lives > 0 && !player.alive) {
+  if (!game.finished && game.mode === 'coop' && player.lives > 0 && !player.alive) {
     player.alive = true;
     player.health = SPACE_ARENA.playerHealth;
     player.respawnAt = null;
@@ -240,7 +252,7 @@ function moveProjectiles(game, deltaSeconds, now) {
     const hit = game.mode === 'coop'
       ? game.enemies.find((enemy) => distance(enemy, projectile) < 22)
       : Object.values(game.players).find((player) =>
-        player.connected && player.alive && player.id !== projectile.ownerId &&
+        player.connected && !player.reconnecting && player.alive && player.id !== projectile.ownerId &&
         player.invulnerableUntil <= now && distance(player, projectile) < 23);
     if (!hit) {
       activeProjectiles.push(projectile);
@@ -279,7 +291,7 @@ function moveProjectiles(game, deltaSeconds, now) {
 function moveEnemies(game, deltaSeconds, now) {
   for (const enemy of game.enemies) {
     const target = Object.values(game.players)
-      .filter((player) => player.connected && player.alive)
+      .filter((player) => player.connected && !player.reconnecting && player.alive)
       .sort((a, b) => distance(a, enemy) - distance(b, enemy))[0];
     if (!target) continue;
     const dx = target.x - enemy.x;
@@ -328,7 +340,7 @@ function startNextWave(game, now, random) {
 }
 
 function finishFreeForAll(game) {
-  const players = Object.values(game.players).filter((player) => player.connected);
+  const players = Object.values(game.players).filter((player) => player.connected || player.reconnecting);
   const highScore = Math.max(0, ...players.map((player) => player.kills));
   const leaders = players.filter((player) => player.kills === highScore);
   game.winnerId = highScore > 0 && leaders.length === 1 ? leaders[0].id : null;

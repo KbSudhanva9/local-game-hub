@@ -10,6 +10,7 @@ const STARTING_POSITION = [
   'RNBQKBNR',
 ];
 const PROMOTIONS = ['q', 'r', 'b', 'n'];
+const PIECE_VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9 };
 const KNIGHT_STEPS = [
   [-2, -1], [-2, 1], [-1, -2], [-1, 2],
   [1, -2], [1, 2], [2, -1], [2, 1],
@@ -41,6 +42,10 @@ export function createChessGame(whiteId, blackId) {
     stalemate: false,
     finished: false,
     lastMove: null,
+    materialLost: {
+      [whiteId]: { pieces: 0, points: 0, byType: { p: 0, n: 0, b: 0, r: 0, q: 0 } },
+      [blackId]: { pieces: 0, points: 0, byType: { p: 0, n: 0, b: 0, r: 0, q: 0 } },
+    },
   };
   game.history[positionKey(game)] = 1;
   return game;
@@ -66,6 +71,14 @@ export function playChessMove(game, playerId, fromSquare, toSquare, promotion = 
     ? (game.turn === 'w' ? 'p' : 'P')
     : game.board[to];
   const capture = capturedPiece !== '.';
+  if (capture) {
+    const capturedPlayerId = colorOf(capturedPiece) === 'w' ? game.whiteId : game.blackId;
+    const lost = game.materialLost[capturedPlayerId];
+    const pieceType = capturedPiece.toLowerCase();
+    lost.pieces += 1;
+    lost.points += PIECE_VALUES[pieceType];
+    lost.byType[pieceType] += 1;
+  }
   applyMove(game, legalMove);
   if (movingPiece.toLowerCase() === 'p' || capture) game.halfmoveClock = 0;
   else game.halfmoveClock += 1;
@@ -100,6 +113,10 @@ export function serializeChessGame(game, viewerId = null) {
     ...game,
     board: [...game.board],
     colors: { ...game.colors },
+    materialLost: Object.fromEntries(Object.entries(game.materialLost).map(([playerId, lost]) => [playerId, {
+      ...lost,
+      byType: { ...lost.byType },
+    }])),
     history: undefined,
     legalMoves: !game.finished && (viewerId === null || game.colors[viewerId] === game.turn)
       ? generateLegalMoves(game).map((move) => ({

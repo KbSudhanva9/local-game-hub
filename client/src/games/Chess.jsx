@@ -25,10 +25,14 @@ export function Chess({ room, playerId, connected, error, onMove, onRematch, onL
   const [selectedSquare, setSelectedSquare] = useState(null);
   const [promotionMove, setPromotionMove] = useState(null);
   const [pending, setPending] = useState(false);
+  const [showResult, setShowResult] = useState(room.status === 'finished');
   useEffect(() => {
     setSelectedSquare(null);
     setPromotionMove(null);
   }, [game.lastMove, game.turn, room.status]);
+  useEffect(() => {
+    if (room.status === 'finished') setShowResult(true);
+  }, [room.status]);
   const legalMoves = game.legalMoves || [];
   const destinations = new Set(legalMoves.filter((move) => move.from === selectedSquare).map((move) => move.to));
   const winner = players.find((player) => player.id === game.winnerId);
@@ -190,6 +194,22 @@ export function Chess({ room, playerId, connected, error, onMove, onRematch, onL
               ))}
             </ul>
           </section>
+          <section className="chess-material-card">
+            <div className="eyebrow">CAPTURED MATERIAL</div>
+            <p>Points use standard piece values: pawn 1, knight/bishop 3, rook 5, queen 9.</p>
+            <ul>
+              {players.map((player) => {
+                const lost = game.materialLost?.[player.id] || { pieces: 0, points: 0, byType: {} };
+                return (
+                  <li key={player.id}>
+                    <span>{player.nickname}{player.id === playerId ? ' (you)' : ''}</span>
+                    <strong>{lost.pieces} lost · {lost.points} pts</strong>
+                    <small>{formatPieceLoss(lost.byType)}</small>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
           <div className="chess-rules-card">
             <div className="eyebrow">HOW TO PLAY</div>
             <p>Select one of your pieces, then choose a highlighted legal square. Capture the opposing king’s position to deliver checkmate.</p>
@@ -198,6 +218,42 @@ export function Chess({ room, playerId, connected, error, onMove, onRematch, onL
           </div>
         </aside>
       </div>
+      {room.status === 'finished' && showResult && (
+        <div className="chess-result-backdrop">
+          <section className="chess-result-dialog" role="dialog" aria-modal="true" aria-labelledby="chess-result-title">
+            <button className="chess-result-close" type="button" onClick={() => setShowResult(false)} aria-label="Close result dialog">×</button>
+            <div className={`chess-result-emblem ${game.draw ? 'is-draw' : ''}`} aria-hidden="true">{game.draw ? '½' : game.winnerId === playerId ? '♛' : '♞'}</div>
+            <div className="eyebrow">{game.draw ? 'MATCH COMPLETE' : game.winnerId === playerId ? 'VICTORY' : 'MATCH COMPLETE'}</div>
+            <h2 id="chess-result-title">
+              {game.draw ? 'It’s a draw' : game.winnerId === playerId ? 'You win!' : `${winner?.nickname || 'Your opponent'} wins`}
+            </h2>
+            <p className="chess-result-message">{statusMessage}</p>
+            <div className="chess-material-title">PIECES LOST · POINTS LOST</div>
+            <ul className="chess-material-list">
+              {players.map((player) => {
+                const lost = game.materialLost?.[player.id] || { pieces: 0, points: 0, byType: {} };
+                return (
+                  <li key={player.id}>
+                    <span>{player.nickname}{player.id === playerId ? ' (you)' : ''}</span>
+                    <strong>{lost.pieces} {lost.pieces === 1 ? 'piece' : 'pieces'} · {lost.points} {lost.points === 1 ? 'point' : 'points'}</strong>
+                    <small>{formatPieceLoss(lost.byType)}</small>
+                  </li>
+                );
+              })}
+            </ul>
+            <p className="chess-points-note">Piece values: pawn 1, knight 3, bishop 3, rook 5, queen 9.</p>
+            <div className="chess-result-actions">
+              {isHost && (
+                <button className="button primary" onClick={onRematch}>
+                  {players.length === 2 && players.every((player) => player.connected) ? 'Play again' : 'Return to lobby'} <span>→</span>
+                </button>
+              )}
+              {!isHost && <p className="wait-host">Waiting for the host to start a rematch.</p>}
+              <button className="button secondary" onClick={() => setShowResult(false)}>View board</button>
+            </div>
+          </section>
+        </div>
+      )}
     </section>
   );
 }
@@ -232,4 +288,12 @@ function drawMessage(reason) {
     'threefold-repetition': 'Draw by threefold repetition.',
     disconnect: 'Game awarded due to a disconnect.',
   })[reason] || 'The game is a draw.';
+}
+
+function formatPieceLoss(byType = {}) {
+  const symbols = { q: 'Q', r: 'R', b: 'B', n: 'N', p: 'P' };
+  const detail = Object.entries(symbols)
+    .filter(([type]) => byType[type])
+    .map(([type, symbol]) => `${symbol}×${byType[type]}`);
+  return detail.length ? detail.join('  ') : 'No pieces lost';
 }

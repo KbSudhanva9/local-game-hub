@@ -211,6 +211,24 @@ test('restores a disconnected driver during an active race', () => {
   manager.deleteRoom(host.code);
 });
 
+test('active reconnect can replace the same player session socket without losing room state', () => {
+  const { manager } = createManager();
+  const host = manager.createRoom('Host', 'host-session-123456', 'socket-host');
+  manager.joinRoom(host.code, 'Guest', 'guest-session-123456', 'socket-guest');
+  const room = manager.getRoom(host.code);
+  room.status = 'racing';
+  room.players.forEach((player, index) => {
+    player.car = createCar(player.id, player.nickname, index);
+  });
+
+  const resumed = manager.reconnectRoom(host.code, 'host-session-123456', 'socket-host-refreshed');
+  assert.equal(resumed.previousSocketId, 'socket-host');
+  assert.equal(resumed.room.status, 'racing');
+  assert.equal(resumed.room.hostId, host.playerId);
+  assert.equal(resumed.room.players.find((player) => player.id === host.playerId).connected, true);
+  manager.deleteRoom(host.code);
+});
+
 test('host can reset after the first finisher while other players are still racing', () => {
   const { manager } = createManager();
   const host = manager.createRoom('Host', 'host-session-123456', 'socket-host');
@@ -400,7 +418,7 @@ test('Tic-Tac-Toe detects wins and draws and host can start a rematch', () => {
   manager.deleteRoom(host.code);
 });
 
-test('Tic-Tac-Toe disconnect awards the connected opponent a win', () => {
+test('Tic-Tac-Toe forfeits only after the reconnect grace expires', () => {
   const { manager } = createManager();
   const host = manager.createRoom('Host', 'host-session-123456', 'socket-host', 'tic-tac-toe');
   const guest = manager.joinRoom(host.code, 'Guest', 'guest-session-123456', 'socket-guest');
@@ -408,6 +426,9 @@ test('Tic-Tac-Toe disconnect awards the connected opponent a win', () => {
   manager.disconnect('socket-guest');
 
   const room = manager.getRoom(host.code);
+  assert.equal(room.status, 'playing');
+  const reconnectSequence = room.players.find((player) => player.id === guest.playerId).reconnectSequence;
+  manager.expireDisconnection(host.code, guest.playerId, reconnectSequence);
   assert.equal(room.status, 'finished');
   assert.equal(room.ticTacToe.winnerId, host.playerId);
   assert.equal(room.players.find((player) => player.id === guest.playerId).connected, false);
@@ -520,7 +541,7 @@ test('Bomb Tag transfers on contact and eliminates the holder when the fuse expi
   manager.deleteRoom(host.code);
 });
 
-test('Bomb Tag disconnect forfeits the round to the remaining player', () => {
+test('Bomb Tag disconnect forfeits the round only after the reconnect grace expires', () => {
   const { manager } = createManager();
   const host = manager.createRoom('Host', 'host-session-123456', 'socket-host', 'bomb-tag');
   const guest = manager.joinRoom(host.code, 'Guest', 'guest-session-123456', 'socket-guest');
@@ -528,6 +549,12 @@ test('Bomb Tag disconnect forfeits the round to the remaining player', () => {
   manager.disconnect('socket-host');
 
   const room = manager.getRoom(host.code);
+  manager.clearTimers(room);
+  room.status = 'playing';
+  assert.equal(room.status, 'playing');
+  assert.equal(room.bombTag.players[host.playerId].alive, true);
+  const reconnectSequence = room.players.find((player) => player.id === host.playerId).reconnectSequence;
+  manager.expireDisconnection(host.code, host.playerId, reconnectSequence);
   assert.equal(room.status, 'finished');
   assert.equal(room.hostId, guest.playerId);
   assert.equal(room.bombTag.players[host.playerId].alive, false);
@@ -737,7 +764,7 @@ test('Arena Blaster medium bots act autonomously and timed matches resolve ties'
   assert.equal(match.draw, true);
 });
 
-test('Arena Blaster disconnects end a free-for-all and the host can rematch', () => {
+test('Arena Blaster preserves the match through reconnect grace before applying a forfeit', () => {
   const { manager } = createManager();
   const host = manager.createRoom('Host', 'host-session-123456', 'socket-host', 'arena-blaster');
   const guest = manager.joinRoom(host.code, 'Guest', 'guest-session-123456', 'socket-guest');
@@ -751,6 +778,10 @@ test('Arena Blaster disconnects end a free-for-all and the host can rematch', ()
   room.status = 'playing';
 
   manager.disconnect('socket-guest');
+  assert.equal(room.status, 'playing');
+  assert.equal(room.blaster.entities[guest.playerId].reconnecting, true);
+  const reconnectSequence = room.players.find((player) => player.id === guest.playerId).reconnectSequence;
+  manager.expireDisconnection(host.code, guest.playerId, reconnectSequence);
   assert.equal(room.status, 'finished');
   assert.equal(room.blaster.winnerId, host.playerId);
   assert.equal(room.players.find((player) => player.id === guest.playerId).disconnected, true);
@@ -862,6 +893,10 @@ test('Space Shooting requires host authorization, two players, and supports a re
 
   room.spaceTimer = setInterval(() => {}, 10_000);
   manager.disconnect('socket-guest');
+  assert.equal(room.status, 'playing');
+  assert.equal(room.spaceShooter.players[guest.playerId].reconnecting, true);
+  const reconnectSequence = room.players.find((player) => player.id === guest.playerId).reconnectSequence;
+  manager.expireDisconnection(host.code, guest.playerId, reconnectSequence);
   assert.equal(room.status, 'finished');
   assert.equal(room.spaceShooter.winnerId, host.playerId);
   assert.equal(room.spaceTimer, null);

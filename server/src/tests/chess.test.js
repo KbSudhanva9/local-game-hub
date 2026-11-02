@@ -127,6 +127,19 @@ test('supports en passant and removes the captured pawn', () => {
   assert.equal(game.board[squareIndex('d5')], '.');
 });
 
+test('records captured piece counts and standard lost-material points', () => {
+  const game = createChessGame(WHITE, BLACK);
+  play(game, WHITE, 'e2', 'e4');
+  play(game, BLACK, 'd7', 'd5');
+  play(game, WHITE, 'e4', 'd5');
+  assert.deepEqual(game.materialLost[BLACK], {
+    pieces: 1,
+    points: 1,
+    byType: { p: 1, n: 0, b: 0, r: 0, q: 0 },
+  });
+  assert.equal(serializeChessGame(game).materialLost[BLACK].points, 1);
+});
+
 test('supports choosing a promotion piece', () => {
   const game = makePosition({ e1: 'K', e8: 'k', a7: 'P' });
   play(game, WHITE, 'a7', 'a8', 'n');
@@ -199,6 +212,19 @@ test('Chess rooms enforce capacity, host-only start, legal moves, rematches, and
   );
   manager.playChessMove(host.code, host.playerId, 'socket-host', { from: 'e2', to: 'e4' });
   manager.disconnect('socket-guest');
+  const pendingRoom = manager.getRoom(host.code);
+  assert.equal(pendingRoom.status, 'playing');
+  assert.equal(pendingRoom.chess.finished, false);
+  assert.equal(pendingRoom.players.find((player) => player.id === guest.playerId).connected, false);
+  manager.reconnectRoom(host.code, 'guest-session-123456', 'socket-guest-new');
+  const resumed = manager.getRoom(host.code);
+  assert.equal(resumed.status, 'playing');
+  assert.equal(resumed.chess.turn, 'b');
+  assert.equal(resumed.chess.board[squareIndex('e4')], 'P');
+  assert.equal(resumed.hostId, host.playerId);
+  manager.disconnect('socket-guest-new');
+  const reconnectSequence = manager.getRoom(host.code).players.find((player) => player.id === guest.playerId).reconnectSequence;
+  manager.expireDisconnection(host.code, guest.playerId, reconnectSequence);
   const forfeited = manager.getRoom(host.code);
   assert.equal(forfeited.status, 'finished');
   assert.equal(forfeited.chess.winnerId, host.playerId);
@@ -208,7 +234,7 @@ test('Chess rooms enforce capacity, host-only start, legal moves, rematches, and
   assert.equal(returnedToLobby.status, 'lobby');
   assert.equal(returnedToLobby.chess, null);
   assert.equal(returnedToLobby.hostId, host.playerId);
-  manager.reconnectRoom(host.code, 'guest-session-123456', 'socket-guest-new');
+  manager.reconnectRoom(host.code, 'guest-session-123456', 'socket-guest-final');
   const rematch = manager.startChess(host.code, host.playerId, 'socket-host');
   assert.equal(rematch.chess.whiteId, guest.playerId);
   manager.deleteRoom(host.code);

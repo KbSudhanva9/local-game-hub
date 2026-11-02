@@ -25,6 +25,8 @@ import {
   BLASTER_ARENA,
   createBlasterGame,
   disconnectBlasterPlayer,
+  pauseBlasterPlayer,
+  reconnectBlasterPlayer,
   serializeBlaster,
   setBlasterControls,
   tickBlaster,
@@ -34,6 +36,7 @@ import {
   SPACE_ARENA,
   createSpaceShooter,
   disconnectSpaceShooterPlayer,
+  pauseSpaceShooterPlayer,
   reconnectSpaceShooterPlayer,
   removeSpaceShooterPlayer,
   serializeSpaceShooter,
@@ -51,6 +54,7 @@ import {
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const MAX_PLAYERS = 7;
 const ROOM_CODE_LENGTH = 5;
+const RECONNECT_GRACE_MS = 30_000;
 const GAME_IDS = new Set(['mini-car-race', 'tic-tac-toe', 'chess', 'bomb-tag', 'arena-blaster', 'space-shooter']);
 const GAME_MAX_PLAYERS = {
   'mini-car-race': MAX_PLAYERS,
@@ -75,12 +79,21 @@ export class RoomError extends Error {
 }
 
 export class RoomManager {
-  constructor({ onUpdate = () => {}, onStats = () => {}, now = Date.now, random = Math.random } = {}) {
+  constructor({
+    onUpdate = () => {},
+    onStats = () => {},
+    onClose = () => {},
+    now = Date.now,
+    random = Math.random,
+    reconnectGraceMs = RECONNECT_GRACE_MS,
+  } = {}) {
     this.rooms = new Map();
     this.onUpdate = onUpdate;
     this.onStats = onStats;
+    this.onClose = onClose;
     this.now = now;
     this.random = random;
+    this.reconnectGraceMs = reconnectGraceMs;
   }
 
   createRoom(nickname, token, socketId, gameId = 'mini-car-race') {
@@ -138,6 +151,8 @@ export class RoomManager {
       existing.socketId = socketId;
       existing.connected = true;
       existing.disconnectedAt = null;
+      existing.disconnected = false;
+      existing.reconnecting = false;
       this.notify(room);
       return { room: this.serialize(room), playerId: existing.id, code };
     }
@@ -163,7 +178,9 @@ export class RoomManager {
     this.validateToken(token);
     const player = room.players.find((entry) => entry.token === token);
     if (!player) throw new RoomError('Your player session could not be restored.', 'PLAYER_NOT_FOUND');
-    if (player.connected) throw new RoomError('This player is already connected.', 'ALREADY_JOINED');
+    if (player.connected && player.socketId === socketId) {
+      throw new RoomError('This player is already connected.', 'ALREADY_JOINED');
+    }
     if (room.status === 'finished' && player.disconnected) {
       throw new RoomError('The game ended before you reconnected.', 'GAME_DISCONNECTED');
     }
@@ -171,21 +188,27 @@ export class RoomManager {
         (room.status === 'countdown' || room.status === 'playing')) {
       throw new RoomError('You were removed from the active blaster round.', 'GAME_DISCONNECTED');
     }
+    const previousSocketId = player.socketId;
+    this.clearReconnectTimer(player);
     player.socketId = socketId;
     player.connected = true;
     player.disconnectedAt = null;
     player.disconnected = false;
+    player.reconnecting = false;
     if (player.car) {
       player.car.disconnected = false;
       player.car.throttle = false;
       player.car.brake = false;
       player.car.steer = 0;
     }
-    if (room.gameId === 'space-shooter' && (room.status === 'countdown' || room.status === 'playing')) {
+    if (room.gameId === 'space-shooter' && room.spaceShooter) {
       reconnectSpaceShooterPlayer(room.spaceShooter, player.id, this.now());
     }
+    if (room.gameId === 'arena-blaster' && room.blaster) {
+      reconnectBlasterPlayer(room.blaster, player.id);
+    }
     this.notify(room);
-    return { room: this.serialize(room), playerId: player.id, code };
+    return { room: this.serialize(room), playerId: player.id, code, previousSocketId };
   }
 
   startRace(code, playerId, socketId) {
@@ -609,6 +632,7 @@ export class RoomManager {
 
   resetRoom(room) {
     this.clearTimers(room);
+    room.players.forEach((player) => this.clearReconnectTimer(player));
     room.status = 'lobby';
     room.countdown = null;
     room.startedAt = null;
@@ -622,6 +646,7 @@ export class RoomManager {
     for (const player of room.players) {
       player.car = null;
       player.disconnected = false;
+      player.reconnecting = false;
     }
     this.notify(room);
     return this.serialize(room);
@@ -636,6 +661,7 @@ export class RoomManager {
     if (room.status !== 'lobby' && target.connected) {
       throw new RoomError('Only disconnected players can be removed after the race starts.', 'PLAYER_CONNECTED');
     }
+    this.clearReconnectTimer(target);
 
     if (room.gameId === 'tic-tac-toe' && room.status === 'playing') {
       this.forfeitTicTacToe(room, target.id);
@@ -673,6 +699,7 @@ export class RoomManager {
     if (room.status !== 'lobby' && !(room.status === 'finished' && ['tic-tac-toe', 'chess', 'bomb-tag', 'arena-blaster', 'space-shooter'].includes(room.gameId))) {
       throw new RoomError('You cannot leave while a game is in progress.', 'GAME_ACTIVE');
     }
+    this.clearReconnectTimer(room.players.find((player) => player.id === playerId));
     room.players = room.players.filter((player) => player.id !== playerId);
     if (room.players.length === 0 || !room.players.some((player) => player.connected)) {
       this.deleteRoom(room.code);
@@ -689,38 +716,17 @@ export class RoomManager {
       if (!player) continue;
       player.connected = false;
       player.disconnectedAt = this.now();
-      if (room.gameId === 'mini-car-race' && (room.status === 'racing' || room.status === 'countdown')) {
-        player.disconnected = true;
-        if (player.car) {
-          player.car.disconnected = true;
-          player.car.throttle = false;
-          player.car.brake = false;
-          player.car.steer = 0;
-        }
-        this.finishIfComplete(room);
-      } else if (room.gameId === 'tic-tac-toe' && room.status === 'playing') {
-        this.forfeitTicTacToe(room, player.id);
-      } else if (room.gameId === 'chess' && room.status === 'playing') {
-        if (forfeitChessGame(room.chess, player.id)) {
-          room.status = 'finished';
-          room.finishingOrder = [room.chess.winnerId];
-        }
-      } else if (room.gameId === 'bomb-tag' && (room.status === 'countdown' || room.status === 'playing')) {
-        player.disconnected = true;
-        this.forfeitBombTag(room, player.id);
-      } else if (room.gameId === 'arena-blaster' && (room.status === 'countdown' || room.status === 'playing')) {
-        player.disconnected = true;
-        const finished = disconnectBlasterPlayer(room.blaster, player.id);
-        if (finished) {
-          room.status = 'finished';
-          this.clearTimers(room);
-        }
-      } else if (room.gameId === 'space-shooter' && (room.status === 'countdown' || room.status === 'playing')) {
-        player.disconnected = true;
-        if (disconnectSpaceShooterPlayer(room.spaceShooter, player.id)) {
-          room.status = 'finished';
-          this.clearTimers(room);
-        }
+      const activeGame = ['countdown', 'playing', 'racing'].includes(room.status);
+      if (activeGame) {
+        this.pausePlayerForReconnect(room, player);
+        const reconnectSequence = player.reconnectSequence += 1;
+        player.reconnectTimer = setTimeout(
+          () => this.expireDisconnection(room.code, player.id, reconnectSequence),
+          this.reconnectGraceMs,
+        );
+        player.reconnectTimer.unref?.();
+        this.notify(room);
+        return null;
       }
 
       const connected = room.players.filter((entry) => entry.connected);
@@ -733,6 +739,76 @@ export class RoomManager {
       return null;
     }
     return null;
+  }
+
+  pausePlayerForReconnect(room, player) {
+    if (room.gameId === 'mini-car-race' && player.car) {
+      player.car.throttle = false;
+      player.car.brake = false;
+      player.car.steer = 0;
+    } else if (room.gameId === 'bomb-tag' && room.bombTag?.players[player.id]) {
+      room.bombTag.players[player.id].controls = { up: false, down: false, left: false, right: false };
+    } else if (room.gameId === 'arena-blaster') {
+      player.reconnecting = true;
+      pauseBlasterPlayer(room.blaster, player.id);
+    } else if (room.gameId === 'space-shooter') {
+      player.reconnecting = true;
+      pauseSpaceShooterPlayer(room.spaceShooter, player.id);
+    } else {
+      player.reconnecting = true;
+    }
+  }
+
+  expireDisconnection(code, playerId, reconnectSequence) {
+    const room = this.rooms.get(code);
+    const player = room?.players.find((entry) => entry.id === playerId);
+    if (!room || !player || player.connected || player.reconnectSequence !== reconnectSequence) return;
+    this.clearReconnectTimer(player);
+    player.reconnecting = false;
+    player.disconnected = true;
+
+    if (room.gameId === 'mini-car-race' && player.car) {
+      player.car.disconnected = true;
+      this.finishIfComplete(room);
+    } else if (room.gameId === 'tic-tac-toe' && room.status === 'playing') {
+      this.forfeitTicTacToe(room, player.id);
+    } else if (room.gameId === 'chess' && room.status === 'playing') {
+      if (forfeitChessGame(room.chess, player.id)) {
+        room.status = 'finished';
+        room.finishingOrder = [room.chess.winnerId];
+      }
+    } else if (room.gameId === 'bomb-tag' && (room.status === 'countdown' || room.status === 'playing')) {
+      this.forfeitBombTag(room, player.id);
+    } else if (room.gameId === 'arena-blaster' && (room.status === 'countdown' || room.status === 'playing')) {
+      if (disconnectBlasterPlayer(room.blaster, player.id)) {
+        room.status = 'finished';
+        this.clearTimers(room);
+      }
+    } else if (room.gameId === 'space-shooter' && (room.status === 'countdown' || room.status === 'playing')) {
+      if (disconnectSpaceShooterPlayer(room.spaceShooter, player.id)) {
+        room.status = 'finished';
+        this.clearTimers(room);
+      }
+    }
+
+    const connectedPlayers = room.players.filter((entry) => entry.connected);
+    if (room.hostId === player.id && connectedPlayers.length > 0) {
+      room.hostId = connectedPlayers[0].id;
+    }
+
+    const hasPendingReconnects = room.players.some((entry) => entry.reconnectTimer);
+    if (connectedPlayers.length === 0 && !hasPendingReconnects) {
+      this.deleteRoom(room.code);
+      this.onClose(room.code);
+      return;
+    }
+    this.notify(room);
+  }
+
+  clearReconnectTimer(player) {
+    if (!player?.reconnectTimer) return;
+    clearTimeout(player.reconnectTimer);
+    player.reconnectTimer = null;
   }
 
   connectedPlayerCount() {
@@ -832,6 +908,9 @@ export class RoomManager {
       connected: true,
       disconnected: false,
       disconnectedAt: null,
+      reconnectTimer: null,
+      reconnectSequence: 0,
+      reconnecting: false,
       car: null,
       index,
     };
@@ -953,6 +1032,7 @@ export class RoomManager {
     const room = this.rooms.get(code);
     if (!room) return;
     this.clearTimers(room);
+    room.players.forEach((player) => this.clearReconnectTimer(player));
     this.rooms.delete(code);
     this.onStats(this.connectedPlayerCount());
   }

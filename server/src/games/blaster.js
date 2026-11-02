@@ -321,11 +321,29 @@ export function disconnectBlasterPlayer(game, playerId) {
   const entity = game.entities[playerId];
   if (!entity || entity.isBot) return false;
   entity.disconnected = true;
+  entity.reconnecting = false;
   entity.alive = false;
   entity.health = 0;
   entity.respawnAt = null;
   entity.controls = { ...EMPTY_CONTROLS };
   return endIfOnlySideRemains(game);
+}
+
+export function pauseBlasterPlayer(game, playerId) {
+  const entity = game?.entities[playerId];
+  if (!entity || entity.isBot) return false;
+  entity.reconnecting = true;
+  entity.controls = { ...EMPTY_CONTROLS };
+  return true;
+}
+
+export function reconnectBlasterPlayer(game, playerId) {
+  const entity = game?.entities[playerId];
+  if (!entity || entity.isBot) return false;
+  entity.reconnecting = false;
+  entity.disconnected = false;
+  entity.controls = { ...EMPTY_CONTROLS };
+  return true;
 }
 
 export function tickBlaster(game, now, random = Math.random) {
@@ -337,7 +355,7 @@ export function tickBlaster(game, now, random = Math.random) {
   const secondsPerTick = BLASTER_ARENA.tickMs / 1000;
 
   for (const entity of Object.values(game.entities)) {
-    if (!entity.alive || entity.disconnected) continue;
+    if (!entity.alive || entity.disconnected || entity.reconnecting) continue;
 
     let horizontal = Number(entity.controls.right) - Number(entity.controls.left);
     let vertical = Number(entity.controls.down) - Number(entity.controls.up);
@@ -368,7 +386,7 @@ export function tickBlaster(game, now, random = Math.random) {
         projectile.y < 0 || projectile.y > BLASTER_ARENA.height) continue;
 
     const hit = Object.values(game.entities).find((target) => {
-      if (!target.alive || target.disconnected) return false;
+      if (!target.alive || target.disconnected || target.reconnecting) return false;
       if (target.id === projectile.ownerId) return false;
       if (game.mode === 'teams' && target.team === projectile.team) return false;
       return Math.hypot(target.x - projectile.x, target.y - projectile.y) <=
@@ -404,6 +422,7 @@ export function serializeBlaster(game) {
       health: entity.health,
       alive: entity.alive,
       disconnected: entity.disconnected,
+      reconnecting: Boolean(entity.reconnecting),
       respawnAt: entity.respawnAt,
       kills: entity.kills,
       deaths: entity.deaths,

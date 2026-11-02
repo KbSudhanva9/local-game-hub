@@ -35,7 +35,7 @@ export default function App() {
   const [socket, setSocket] = useState(null);
   const [connected, setConnected] = useState(false);
   const [room, setRoom] = useState(null);
-  const [screen, setScreen] = useState('home');
+  const [screen, setScreen] = useState(() => session.code ? 'recovering' : 'home');
   const [formMode, setFormMode] = useState('create');
   const [selectedGameId, setSelectedGameId] = useState('mini-car-race');
   const [nickname, setNickname] = useState('');
@@ -332,6 +332,20 @@ export default function App() {
           error={error}
           notice={notice}
         />
+      )}
+      {screen === 'recovering' && (
+        <section className="form-page">
+          <div className="form-card recovery-card" role="status" aria-live="polite">
+            <div className="eyebrow">RESTORING YOUR SESSION</div>
+            <h1>Rejoining your game<span>…</span></h1>
+            <p className="muted">
+              {connected
+                ? `Restoring room ${session.code} and syncing the latest game state.`
+                : `Reconnecting to the game server for room ${session.code}…`}
+            </p>
+            <span className="recovery-spinner" aria-hidden="true" />
+          </div>
+        </section>
       )}
       {screen === 'form' && (
         <section className="form-page">
